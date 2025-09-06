@@ -287,6 +287,7 @@ export class PumpFunSDK {
   //   return transaction;
   // }
 
+  //new buy changes
   async getBuyInstructions(
   buyer: PublicKey,
   mint: PublicKey,
