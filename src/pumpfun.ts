@@ -240,52 +240,123 @@ export class PumpFunSDK {
   }
 
   //buy
+  // async getBuyInstructions(
+  //   buyer: PublicKey,
+  //   mint: PublicKey,
+  //   feeRecipient: PublicKey,
+  //   amount: bigint,
+  //   solAmount: bigint,
+  //   commitment: Commitment = DEFAULT_COMMITMENT
+  // ) {
+  //   const associatedBondingCurve = await getAssociatedTokenAddress(
+  //     mint,
+  //     this.getBondingCurvePDA(mint),
+  //     true
+  //   );
+
+  //   const associatedUser = await getAssociatedTokenAddress(mint, buyer, false);
+
+  //   let transaction = new Transaction();
+
+  //   try {
+  //     await getAccount(this.connection, associatedUser, commitment);
+  //   } catch (e) {
+  //     transaction.add(
+  //       createAssociatedTokenAccountInstruction(
+  //         buyer,
+  //         associatedUser,
+  //         buyer,
+  //         mint
+  //       )
+  //     );
+  //   }
+
+  //   transaction.add(
+  //     await this.program.methods
+  //       .buy(new BN(amount.toString()), new BN(solAmount.toString()))
+  //       .accounts({
+  //         feeRecipient: feeRecipient,
+  //         mint: mint,
+  //         associatedBondingCurve: associatedBondingCurve,
+  //         associatedUser: associatedUser,
+  //         user: buyer,
+  //       })
+  //       .transaction()
+  //   );
+
+  //   return transaction;
+  // }
+
   async getBuyInstructions(
-    buyer: PublicKey,
-    mint: PublicKey,
-    feeRecipient: PublicKey,
-    amount: bigint,
-    solAmount: bigint,
-    commitment: Commitment = DEFAULT_COMMITMENT
-  ) {
-    const associatedBondingCurve = await getAssociatedTokenAddress(
-      mint,
-      this.getBondingCurvePDA(mint),
-      true
-    );
+  buyer: PublicKey,
+  mint: PublicKey,
+  feeRecipient: PublicKey,
+  amount: bigint,
+  solAmount: bigint,
+  commitment: Commitment = DEFAULT_COMMITMENT
+) {
+  const associatedBondingCurve = await getAssociatedTokenAddress(
+    mint,
+    this.getBondingCurvePDA(mint),
+    true
+  );
 
-    const associatedUser = await getAssociatedTokenAddress(mint, buyer, false);
+  const associatedUser = await getAssociatedTokenAddress(mint, buyer, false);
 
-    let transaction = new Transaction();
+  // NEW: Get the global volume accumulator PDA
+  const [globalVolumeAccumulator] = PublicKey.findProgramAddressSync(
+    [Buffer.from("global_volume_accumulator")],
+    this.program.programId
+  );
 
-    try {
-      await getAccount(this.connection, associatedUser, commitment);
-    } catch (e) {
-      transaction.add(
-        createAssociatedTokenAccountInstruction(
-          buyer,
-          associatedUser,
-          buyer,
-          mint
-        )
-      );
-    }
+  // NEW: Get the user volume accumulator PDA
+  const [userVolumeAccumulator] = PublicKey.findProgramAddressSync(
+    [Buffer.from("user_volume_accumulator"), buyer.toBuffer()],
+    this.program.programId
+  );
 
+  // NEW: Get the global account for additional accounts
+  const globalAccount = await this.getGlobalAccount(commitment);
+  const [global] = PublicKey.findProgramAddressSync(
+    [Buffer.from(GLOBAL_ACCOUNT_SEED)],
+    this.program.programId
+  );
+
+  let transaction = new Transaction();
+
+  try {
+    await getAccount(this.connection, associatedUser, commitment);
+  } catch (e) {
     transaction.add(
-      await this.program.methods
-        .buy(new BN(amount.toString()), new BN(solAmount.toString()))
-        .accounts({
-          feeRecipient: feeRecipient,
-          mint: mint,
-          associatedBondingCurve: associatedBondingCurve,
-          associatedUser: associatedUser,
-          user: buyer,
-        })
-        .transaction()
+      createAssociatedTokenAccountInstruction(
+        buyer,
+        associatedUser,
+        buyer,
+        mint
+      )
     );
-
-    return transaction;
   }
+
+  transaction.add(
+    await this.program.methods
+      .buy(new BN(amount.toString()), new BN(solAmount.toString()))
+      .accounts({
+        feeRecipient: feeRecipient,
+        mint: mint,
+        associatedBondingCurve: associatedBondingCurve,
+        associatedUser: associatedUser,
+        user: buyer,
+        // NEW: Add the required accounts
+        global: global,
+        globalVolumeAccumulator: globalVolumeAccumulator,
+        userVolumeAccumulator: userVolumeAccumulator,
+        userAccTarget: buyer, // user_acc_target is typically the user themselves
+      })
+      .transaction()
+  );
+
+  return transaction;
+}
 
   //sell
   async getSellInstructionsByTokenAmount(
@@ -324,38 +395,80 @@ export class PumpFunSDK {
     );
   }
 
+  // async getSellInstructions(
+  //   seller: PublicKey,
+  //   mint: PublicKey,
+  //   feeRecipient: PublicKey,
+  //   amount: bigint,
+  //   minSolOutput: bigint
+  // ) {
+  //   const associatedBondingCurve = await getAssociatedTokenAddress(
+  //     mint,
+  //     this.getBondingCurvePDA(mint),
+  //     true
+  //   );
+
+  //   const associatedUser = await getAssociatedTokenAddress(mint, seller, false);
+
+  //   let transaction = new Transaction();
+
+  //   transaction.add(
+  //     await this.program.methods
+  //       .sell(new BN(amount.toString()), new BN(minSolOutput.toString()))
+  //       .accounts({
+  //         feeRecipient: feeRecipient,
+  //         mint: mint,
+  //         associatedBondingCurve: associatedBondingCurve,
+  //         associatedUser: associatedUser,
+  //         user: seller,
+  //       })
+  //       .transaction()
+  //   );
+
+  //   return transaction;
+  // }
+
   async getSellInstructions(
-    seller: PublicKey,
-    mint: PublicKey,
-    feeRecipient: PublicKey,
-    amount: bigint,
-    minSolOutput: bigint
-  ) {
-    const associatedBondingCurve = await getAssociatedTokenAddress(
-      mint,
-      this.getBondingCurvePDA(mint),
-      true
-    );
+  seller: PublicKey,
+  mint: PublicKey,
+  feeRecipient: PublicKey,
+  amount: bigint,
+  minSolOutput: bigint,
+  commitment: Commitment = DEFAULT_COMMITMENT
+) {
+  const associatedBondingCurve = await getAssociatedTokenAddress(
+    mint,
+    this.getBondingCurvePDA(mint),
+    true
+  );
 
-    const associatedUser = await getAssociatedTokenAddress(mint, seller, false);
+  const associatedUser = await getAssociatedTokenAddress(mint, seller, false);
 
-    let transaction = new Transaction();
+  // NEW: Get the global account
+  const [global] = PublicKey.findProgramAddressSync(
+    [Buffer.from(GLOBAL_ACCOUNT_SEED)],
+    this.program.programId
+  );
 
-    transaction.add(
-      await this.program.methods
-        .sell(new BN(amount.toString()), new BN(minSolOutput.toString()))
-        .accounts({
-          feeRecipient: feeRecipient,
-          mint: mint,
-          associatedBondingCurve: associatedBondingCurve,
-          associatedUser: associatedUser,
-          user: seller,
-        })
-        .transaction()
-    );
+  let transaction = new Transaction();
 
-    return transaction;
-  }
+  transaction.add(
+    await this.program.methods
+      .sell(new BN(amount.toString()), new BN(minSolOutput.toString()))
+      .accounts({
+        feeRecipient: feeRecipient,
+        mint: mint,
+        associatedBondingCurve: associatedBondingCurve,
+        associatedUser: associatedUser,
+        user: seller,
+        // NEW: Add the global account
+        global: global,
+      })
+      .transaction()
+  );
+
+  return transaction;
+}
 
   async getBondingCurveAccount(
     mint: PublicKey,
